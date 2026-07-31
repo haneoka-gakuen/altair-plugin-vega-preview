@@ -1,0 +1,23 @@
+name: Feature proposal
+description: Propose an Altair or Vega preview integration change
+title: "[Proposal] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Use case
+    validations:
+      required: true
+  - type: textarea
+    id: contract
+    attributes:
+      label: Proposed API or protocol boundary
+    validations:
+      required: true
+  - type: textarea
+    id: lifecycle
+    attributes:
+      label: Cancellation and lifecycle behavior
+    validations:
+      required: true

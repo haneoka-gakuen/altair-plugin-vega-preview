@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: altair-plugin-vega-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out Vega preview plugin
+        uses: actions/checkout@v7
+        with:
+          path: altair-plugin-vega-preview
+
+      - name: Check out Altair
+        uses: actions/checkout@v7
+        with:
+          repository: haneoka-gakuen/altair
+          path: altair-plugin-vega-preview/.dependencies/altair
+
+      - name: Check out Altair ADV plugin
+        uses: actions/checkout@v7
+        with:
+          repository: haneoka-gakuen/altair-plugin-adv
+          path: altair-plugin-vega-preview/.dependencies/altair-plugin-adv
+
+      - name: Check out Vega
+        uses: actions/checkout@v7
+        with:
+          repository: haneoka-gakuen/vega
+          path: altair-plugin-vega-preview/.dependencies/vega
+
+      - name: Check out portable Vega UI
+        uses: actions/checkout@v7
+        with:
+          repository: haneoka-gakuen/vega-ui-portable
+          path: altair-plugin-vega-preview/.dependencies/vega-ui-portable
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.14.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: altair-plugin-vega-preview/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: altair-plugin-vega-preview
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Vega protocol
+        working-directory: altair-plugin-vega-preview
+        run: pnpm --filter @haneoka/vega-protocol build
+
+      - name: Build Vega
+        working-directory: altair-plugin-vega-preview
+        run: pnpm --filter @haneoka/vega build:core
+
+      - name: Build Altair preview client
+        working-directory: altair-plugin-vega-preview
+        run: pnpm --filter @haneoka/altair-preview-client build
+
+      - name: Build Altair
+        working-directory: altair-plugin-vega-preview
+        run: pnpm --filter @haneoka/altair build:core
+
+      - name: Build Altair ADV plugin
+        working-directory: altair-plugin-vega-preview
+        run: pnpm --filter @haneoka/altair-plugin-adv build
+
+      - name: Check package
+        working-directory: altair-plugin-vega-preview
+        run: pnpm check
+
+      - name: Inspect package contents
+        working-directory: altair-plugin-vega-preview
+        run: pnpm pack --dry-run

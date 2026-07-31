@@ -1,0 +1,91 @@
+name: Publish
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  npm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: npm
+    steps:
+      - name: Check out Vega preview plugin
+        uses: actions/checkout@v7
+        with:
+          path: altair-plugin-vega-preview
+
+      - name: Check out Altair
+        uses: actions/checkout@v7
+        with:
+          repository: haneoka-gakuen/altair
+          path: altair-plugin-vega-preview/.dependencies/altair
+
+      - name: Check out Vega
+        uses: actions/checkout@v7
+        with:
+          repository: haneoka-gakuen/vega
+          path: altair-plugin-vega-preview/.dependencies/vega
+
+      - name: Check out portable Vega UI
+        uses: actions/checkout@v7
+        with:
+          repository: haneoka-gakuen/vega-ui-portable
+          path: altair-plugin-vega-preview/.dependencies/vega-ui-portable
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.14.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Install dependencies
+        working-directory: altair-plugin-vega-preview
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Vega protocol
+        working-directory: altair-plugin-vega-preview
+        run: pnpm --filter @haneoka/vega-protocol build
+
+      - name: Build Vega
+        working-directory: altair-plugin-vega-preview
+        run: pnpm --filter @haneoka/vega build:core
+
+      - name: Build Altair preview client
+        working-directory: altair-plugin-vega-preview
+        run: pnpm --filter @haneoka/altair-preview-client build
+
+      - name: Build Altair
+        working-directory: altair-plugin-vega-preview
+        run: pnpm --filter @haneoka/altair build:core
+
+      - name: Check package
+        working-directory: altair-plugin-vega-preview
+        run: pnpm check
+
+      - name: Verify release version
+        working-directory: altair-plugin-vega-preview
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: node -e 'const p=require("./package.json"); if(process.env.RELEASE_TAG !== `v${p.version}`) throw new Error(`Release ${process.env.RELEASE_TAG} does not match v${p.version}`)'
+
+      - name: Publish package
+        working-directory: altair-plugin-vega-preview
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          package_name=$(node -p "require('./package.json').name.replaceAll('/', '-')")
+          package_dir="$RUNNER_TEMP/$package_name"
+          mkdir -p "$package_dir"
+          pnpm pack --pack-destination "$package_dir"
+          npm publish "$package_dir"/*.tgz --access public --provenance
