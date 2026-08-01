@@ -37,6 +37,16 @@ jobs:
           repository: haneoka-gakuen/vega-ui-portable
           path: altair-plugin-vega-preview/.dependencies/vega-ui-portable
 
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: haneoka-gakuen/vega-plugin-richtext
+          path: altair-plugin-vega-preview/.dependencies/vega-plugin-richtext
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: haneoka-gakuen/altair-plugin-adv
+          path: altair-plugin-vega-preview/.dependencies/altair-plugin-adv
+          persist-credentials: false
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
         with:
