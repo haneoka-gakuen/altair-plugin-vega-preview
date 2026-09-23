@@ -4,9 +4,7 @@ import {
   type AltairPreviewProviderContribution,
   type AltairPreviewRequest,
 } from "@haneoka/altair/plugins";
-import {
-  ALTAIR_ADV_SERVICE,
-} from "@haneoka/altair-plugin-adv/services";
+import { ALTAIR_ADV_SERVICE } from "@haneoka/altair-plugin-adv/services";
 import { vegaCompilerContribution } from "./compiler.js";
 import {
   ALTAIR_VEGA_PREVIEW_PLUGIN_ID,
@@ -16,9 +14,7 @@ import {
 } from "./contracts.js";
 import { createAltairVegaPreviewService } from "./preview.js";
 
-export const createAltairVegaPreviewPlugin = (
-  options: AltairVegaPreviewPluginOptions = {},
-) => {
+export const createAltairVegaPreviewPlugin = (options: AltairVegaPreviewPluginOptions = {}) => {
   const priority = options.priority ?? 100;
   if (!Number.isSafeInteger(priority)) {
     throw new TypeError("Altair Vega preview priority must be an integer");
@@ -38,13 +34,9 @@ export const createAltairVegaPreviewPlugin = (
     setup(context) {
       const adv = context.service(ALTAIR_ADV_SERVICE);
       if (!adv) {
-        throw new ReferenceError(
-          "Altair ADV service is unavailable",
-        );
+        throw new ReferenceError("Altair ADV service is unavailable");
       }
-      const service = context.use(
-        createAltairVegaPreviewService(options, adv),
-      );
+      const service = context.use(createAltairVegaPreviewService(options, adv));
       context.provide(ALTAIR_VEGA_PREVIEW_SERVICE, service);
       context.contribute("compiler", vegaCompilerContribution, {
         priority,
@@ -61,13 +53,9 @@ export const createAltairVegaPreviewPlugin = (
             },
             operation: AltairOperationContext,
           ) {
-            const activeService = operation.service(
-              ALTAIR_VEGA_PREVIEW_SERVICE,
-            );
+            const activeService = operation.service(ALTAIR_VEGA_PREVIEW_SERVICE);
             if (!activeService) {
-              throw new ReferenceError(
-                "Altair Vega preview service is unavailable",
-              );
+              throw new ReferenceError("Altair Vega preview service is unavailable");
             }
             return activeService.createPreview(request);
           },
@@ -81,8 +69,7 @@ export const createAltairVegaPreviewPlugin = (
   });
 };
 
-export const altairVegaPreviewPlugin =
-  createAltairVegaPreviewPlugin();
+export const altairVegaPreviewPlugin = createAltairVegaPreviewPlugin();
 
 export * from "./compiler.js";
 export * from "./contracts.js";

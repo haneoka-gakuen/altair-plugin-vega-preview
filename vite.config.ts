@@ -29,9 +29,7 @@ export default defineConfig({
       external(id) {
         if (externalImports.has(id)) return true;
         if (id.startsWith("@haneoka/")) {
-          throw new Error(
-            `Unexpected Haneoka runtime import: ${id}`,
-          );
+          throw new Error(`Unexpected Haneoka runtime import: ${id}`);
         }
         return false;
       },

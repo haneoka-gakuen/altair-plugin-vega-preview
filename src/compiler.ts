@@ -1,6 +1,4 @@
-import {
-  cloneStoryValue,
-} from "@haneoka/altair/model";
+import { cloneStoryValue } from "@haneoka/altair/model";
 import type {
   AltairCompilerPassContribution,
   AltairCompilerPassRequest,
@@ -15,9 +13,7 @@ import {
   type CompileVegaProjectResult,
   type StoryDiagnostic,
 } from "./projection.js";
-import {
-  altairAdvService,
-} from "@haneoka/altair-plugin-adv/services";
+import { altairAdvService } from "@haneoka/altair-plugin-adv/services";
 import {
   ALTAIR_VEGA_COMPILER_ID,
   ALTAIR_VEGA_PREVIEW_SERVICE,
@@ -27,8 +23,7 @@ import {
 } from "./contracts.js";
 
 const abortReason = (signal: AbortSignal): unknown =>
-  signal.reason ??
-  new DOMException("Altair Vega compilation aborted", "AbortError");
+  signal.reason ?? new DOMException("Altair Vega compilation aborted", "AbortError");
 
 const throwIfAborted = (signal: AbortSignal | undefined): void => {
   if (signal?.aborted) throw abortReason(signal);
@@ -39,22 +34,13 @@ export const compileVegaScene = async (
   compiler: AltairAdvCompiler = altairAdvService,
 ): Promise<AltairVegaCompiledScene> => {
   throwIfAborted(request.signal);
-  const compiled = compiler.compile(
-    request.project,
-    request.sceneId ?? request.project.entrySceneId,
-  );
+  const compiled = compiler.compile(request.project, request.sceneId ?? request.project.entrySceneId);
   throwIfAborted(request.signal);
   return Object.freeze({
-    story: Object.freeze(
-      cloneStoryValue(compiled.story),
-    ) as AltairVegaCompiledScene["story"],
-    diagnostics: Object.freeze(
-      cloneStoryValue(compiled.diagnostics),
-    ),
+    story: Object.freeze(cloneStoryValue(compiled.story)) as AltairVegaCompiledScene["story"],
+    diagnostics: Object.freeze(cloneStoryValue(compiled.diagnostics)),
     sceneId: compiled.sceneId,
-    commandSourceIndexes: Object.freeze([
-      ...compiled.commandSourceIndexes,
-    ]),
+    commandSourceIndexes: Object.freeze([...compiled.commandSourceIndexes]),
   });
 };
 
@@ -63,15 +49,9 @@ export const compileAltairVegaProject = async (
   compiler: AltairAdvCompiler = altairAdvService,
 ): Promise<CompileVegaProjectResult> => {
   throwIfAborted(request.signal);
-  const compiled = compileVegaProjectWithDiagnostics(
-    request.project,
-    request.options,
-    compiler,
-  );
+  const compiled = compileVegaProjectWithDiagnostics(request.project, request.options, compiler);
   throwIfAborted(request.signal);
-  return Object.freeze(
-    cloneStoryValue(compiled),
-  ) as CompileVegaProjectResult;
+  return Object.freeze(cloneStoryValue(compiled)) as CompileVegaProjectResult;
 };
 
 export const compileAltairVegaPreviewStory = async (
@@ -79,15 +59,9 @@ export const compileAltairVegaPreviewStory = async (
   compiler: AltairAdvCompiler = altairAdvService,
 ): Promise<CompileVegaPreviewStoryResult> => {
   throwIfAborted(request.signal);
-  const compiled = compileStoryProjectForVegaPreview(
-    request.project,
-    request.sceneId,
-    compiler,
-  );
+  const compiled = compileStoryProjectForVegaPreview(request.project, request.sceneId, compiler);
   throwIfAborted(request.signal);
-  return Object.freeze(
-    cloneStoryValue(compiled),
-  ) as CompileVegaPreviewStoryResult;
+  return Object.freeze(cloneStoryValue(compiled)) as CompileVegaPreviewStoryResult;
 };
 
 const diagnosticsForCommand = (
@@ -115,9 +89,7 @@ const compileCommand = async (
     throw new ReferenceError("Altair Vega preview service is unavailable");
   }
   const project = cloneStoryValue(request.project);
-  const sceneIndex = project.scenes.findIndex(
-    ({ id }) => id === request.sceneId,
-  );
+  const sceneIndex = project.scenes.findIndex(({ id }) => id === request.sceneId);
   const scene = project.scenes[sceneIndex];
   if (!scene) {
     throw new RangeError(`Unknown Altair scene: ${request.sceneId}`);
@@ -128,14 +100,11 @@ const compileCommand = async (
     sceneId: request.sceneId,
     signal: request.signal,
   });
-  const compiledIndex = compiled.commandSourceIndexes.indexOf(
-    request.commandIndex,
-  );
-  const nativeCommand =
-    compiledIndex < 0 ? undefined : compiled.story.commands[compiledIndex];
+  const compiledIndex = compiled.commandSourceIndexes.indexOf(request.commandIndex);
+  const nativeCommand = compiledIndex < 0 ? undefined : compiled.story.commands[compiledIndex];
   const output =
     nativeCommand === undefined
-      ? request.output ?? null
+      ? (request.output ?? null)
       : {
           ...cloneStoryValue(nativeCommand),
           ...(request.output ? cloneStoryValue(request.output) : {}),
@@ -143,21 +112,16 @@ const compileCommand = async (
   const diagnostics =
     nativeCommand === undefined && request.output === null
       ? []
-      : diagnosticsForCommand(
-          compiled.diagnostics,
-          sceneIndex,
-          request.commandIndex,
-        );
+      : diagnosticsForCommand(compiled.diagnostics, sceneIndex, request.commandIndex);
   return {
     output,
     diagnostics,
   };
 };
 
-export const vegaCompilerContribution: AltairCompilerPassContribution =
-  Object.freeze({
-    id: ALTAIR_VEGA_COMPILER_ID,
-    name: "Vega ADV compiler",
-    order: 10_000,
-    apply: compileCommand,
-  });
+export const vegaCompilerContribution: AltairCompilerPassContribution = Object.freeze({
+  id: ALTAIR_VEGA_COMPILER_ID,
+  name: "Vega ADV compiler",
+  order: 10_000,
+  apply: compileCommand,
+});

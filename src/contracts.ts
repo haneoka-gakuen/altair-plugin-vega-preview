@@ -1,32 +1,18 @@
-import {
-  defineAltairService,
-  type AltairPreviewRequest,
-  type AltairPreviewSession,
-} from "@haneoka/altair/plugins";
-import type {
-  JsonObject,
-  StoryProject,
-} from "@haneoka/altair/model";
+import { defineAltairService, type AltairPreviewRequest, type AltairPreviewSession } from "@haneoka/altair/plugins";
+import type { JsonObject, StoryProject } from "@haneoka/altair/model";
 import type {
   CompileVegaPreviewStoryResult,
   CompileVegaProjectOptions,
   CompileVegaProjectResult,
   StoryDiagnostic,
 } from "./projection.js";
-import type {
-  VegaEngine,
-  VegaPlugin,
-} from "@haneoka/vega/engine";
-import type {
-  VegaPreviewIdentity,
-} from "@haneoka/vega-protocol";
+import type { VegaEngine, VegaPlugin } from "@haneoka/vega/engine";
+import type { VegaPreviewIdentity } from "@haneoka/vega-protocol";
 
-export const ALTAIR_VEGA_PREVIEW_PLUGIN_ID =
-  "haneoka.altair-vega-preview" as const;
+export const ALTAIR_VEGA_PREVIEW_PLUGIN_ID = "haneoka.altair-vega-preview" as const;
 export const ALTAIR_VEGA_COMPILER_ID = "vega-adv" as const;
 export const ALTAIR_VEGA_PREVIEW_PROVIDER_ID = "vega" as const;
-export const ALTAIR_VEGA_PREVIEW_SERVICE_ID =
-  "haneoka.altair.services.vega-preview" as const;
+export const ALTAIR_VEGA_PREVIEW_SERVICE_ID = "haneoka.altair.services.vega-preview" as const;
 export const ALTAIR_VEGA_PREVIEW_DEFAULT_MOUNT = "default" as const;
 
 export interface AltairVegaCompileRequest {
@@ -52,37 +38,21 @@ export interface AltairVegaCompiledScene {
 }
 
 export interface AltairVegaPreviewService {
-  compileProject(
-    request: AltairVegaCompileProjectRequest,
-  ): Promise<CompileVegaProjectResult>;
-  compilePreviewStory(
-    request: AltairVegaCompileRequest,
-  ): Promise<CompileVegaPreviewStoryResult>;
-  compileScene(
-    request: AltairVegaCompileRequest,
-  ): Promise<AltairVegaCompiledScene>;
-  registerMount(
-    id: string,
-    mount: HTMLElement,
-  ): { dispose(): void };
+  compileProject(request: AltairVegaCompileProjectRequest): Promise<CompileVegaProjectResult>;
+  compilePreviewStory(request: AltairVegaCompileRequest): Promise<CompileVegaPreviewStoryResult>;
+  compileScene(request: AltairVegaCompileRequest): Promise<AltairVegaCompiledScene>;
+  registerMount(id: string, mount: HTMLElement): { dispose(): void };
   /**
    * Registers already-authorized Vega modules for one preview profile.
    * Catalog loading and permission review remain the host's responsibility.
    */
-  registerRuntimeProfile(
-    id: string,
-    profile: AltairVegaRuntimeProfile,
-  ): { dispose(): void };
-  createPreview(
-    request: AltairPreviewRequest & { readonly signal: AbortSignal },
-  ): Promise<AltairPreviewSession>;
+  registerRuntimeProfile(id: string, profile: AltairVegaRuntimeProfile): { dispose(): void };
+  createPreview(request: AltairPreviewRequest & { readonly signal: AbortSignal }): Promise<AltairPreviewSession>;
   dispose(): Promise<void>;
 }
 
 export const ALTAIR_VEGA_PREVIEW_SERVICE =
-  defineAltairService<AltairVegaPreviewService>(
-    ALTAIR_VEGA_PREVIEW_SERVICE_ID,
-  );
+  defineAltairService<AltairVegaPreviewService>(ALTAIR_VEGA_PREVIEW_SERVICE_ID);
 
 export interface AltairVegaEngineFactoryContext {
   readonly identity: VegaPreviewIdentity;
@@ -132,16 +102,11 @@ export interface AltairVegaPreviewPluginOptions {
   /** Default theme contribution id for previews without a profile override. */
   readonly theme?: string | false;
   readonly renderBackend?: string;
-  readonly createEngine?: (
-    context: AltairVegaEngineFactoryContext,
-  ) => VegaEngine | Promise<VegaEngine>;
+  readonly createEngine?: (context: AltairVegaEngineFactoryContext) => VegaEngine | Promise<VegaEngine>;
   readonly createRuntime?: (
     context: AltairVegaRuntimeFactoryContext,
   ) => AltairVegaRuntimeHandle | Promise<AltairVegaRuntimeHandle>;
-  readonly createIdentity?: (
-    request: AltairPreviewRequest,
-    sequence: number,
-  ) => VegaPreviewIdentity;
+  readonly createIdentity?: (request: AltairPreviewRequest, sequence: number) => VegaPreviewIdentity;
   readonly onBackgroundError?: (error: unknown) => void;
 }
 

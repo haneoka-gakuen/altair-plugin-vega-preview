@@ -1,23 +1,13 @@
-import {
-  access,
-  lstat,
-  readFile,
-  readdir,
-  realpath,
-  stat,
-} from "node:fs/promises";
+import { access, lstat, readFile, readdir, realpath, stat } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-const manifest = JSON.parse(
-  await readFile(resolve(root, "package.json"), "utf8"),
-);
+const manifest = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
 
 const policy = Object.freeze({
   name: "@haneoka/altair-plugin-vega-preview",
-  repository:
-    "git+https://github.com/haneoka-gakuen/altair-plugin-vega-preview.git",
+  repository: "git+https://github.com/haneoka-gakuen/altair-plugin-vega-preview.git",
   peers: Object.freeze([
     "@haneoka/altair",
     "@haneoka/altair-plugin-adv",
@@ -60,21 +50,12 @@ if (manifest.repository?.url !== policy.repository) {
 if (manifest.altair?.pluginApi !== 2) {
   fail("Altair plugin API must be 2");
 }
-if (
-  manifest.altair?.dependencies?.["haneoka.altair-adv"] !==
-  "^0.1.0"
-) {
+if (manifest.altair?.dependencies?.["haneoka.altair-adv"] !== "^0.1.0") {
   fail("Altair ADV plugin dependency must be declared");
 }
 
-const forbiddenDependency =
-  /(?:live2d|cubism|motionsync|@esotericsoftware|spine|pixi)/iu;
-for (const section of [
-  "dependencies",
-  "devDependencies",
-  "optionalDependencies",
-  "peerDependencies",
-]) {
+const forbiddenDependency = /(?:live2d|cubism|motionsync|@esotericsoftware|spine|pixi)/iu;
+for (const section of ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"]) {
   for (const name of Object.keys(manifest[section] ?? {})) {
     if (forbiddenDependency.test(name)) {
       fail(`forbidden SDK/runtime dependency ${name} in ${section}`);
@@ -108,12 +89,7 @@ const collectTargets = (value) => {
 };
 
 const targets = new Set(
-  [
-    manifest.main,
-    manifest.module,
-    manifest.types,
-    ...collectTargets(manifest.exports),
-  ].filter(
+  [manifest.main, manifest.module, manifest.types, ...collectTargets(manifest.exports)].filter(
     (value) => typeof value === "string" && value.startsWith("./dist/"),
   ),
 );
@@ -137,9 +113,7 @@ const insideRoot = (path) => {
   const pathFromRoot = relative(root, path);
   return (
     pathFromRoot === "" ||
-    (!pathFromRoot.startsWith(`..${sep}`) &&
-      pathFromRoot !== ".." &&
-      !pathFromRoot.startsWith(sep))
+    (!pathFromRoot.startsWith(`..${sep}`) && pathFromRoot !== ".." && !pathFromRoot.startsWith(sep))
   );
 };
 
@@ -152,10 +126,7 @@ const walkRepository = async (path, relativePath = "") => {
   if (info.isDirectory()) {
     for (const entry of await readdir(path)) {
       if (!relativePath && ignoredRoots.has(entry)) continue;
-      await walkRepository(
-        resolve(path, entry),
-        relativePath ? `${relativePath}/${entry}` : entry,
-      );
+      await walkRepository(resolve(path, entry), relativePath ? `${relativePath}/${entry}` : entry);
     }
     return;
   }
@@ -163,13 +134,9 @@ const walkRepository = async (path, relativePath = "") => {
 };
 
 await walkRepository(root);
-const restrictedRepositoryFiles = repositoryFiles.filter(
-  (path) => restrictedPath.test(path) || mediaPath.test(path),
-);
+const restrictedRepositoryFiles = repositoryFiles.filter((path) => restrictedPath.test(path) || mediaPath.test(path));
 if (restrictedRepositoryFiles.length > 0) {
-  fail(
-    `restricted SDK, runtime, model, or asset payload:\n${restrictedRepositoryFiles.join("\n")}`,
-  );
+  fail(`restricted SDK, runtime, model, or asset payload:\n${restrictedRepositoryFiles.join("\n")}`);
 }
 
 const publishableFiles = [];
@@ -188,10 +155,7 @@ const walkPublishable = async (path, relativePath) => {
   }
   if (info.isDirectory()) {
     for (const entry of await readdir(path)) {
-      await walkPublishable(
-        resolve(path, entry),
-        relativePath ? `${relativePath}/${entry}` : entry,
-      );
+      await walkPublishable(resolve(path, entry), relativePath ? `${relativePath}/${entry}` : entry);
     }
     return;
   }
@@ -203,12 +167,7 @@ const walkPublishable = async (path, relativePath) => {
 
 await walkPublishable(resolve(root, "package.json"), "package.json");
 for (const entry of manifest.files ?? []) {
-  if (
-    typeof entry !== "string" ||
-    !entry ||
-    entry.startsWith("/") ||
-    entry.includes("*")
-  ) {
+  if (typeof entry !== "string" || !entry || entry.startsWith("/") || entry.includes("*")) {
     fail(`invalid package files entry ${String(entry)}`);
   }
   const path = resolve(root, entry);
@@ -218,9 +177,7 @@ for (const entry of manifest.files ?? []) {
   await walkPublishable(path, entry);
 }
 
-const restrictedPublishableFiles = publishableFiles.filter(
-  (path) => restrictedPath.test(path) || mediaPath.test(path),
-);
+const restrictedPublishableFiles = publishableFiles.filter((path) => restrictedPath.test(path) || mediaPath.test(path));
 if (restrictedPublishableFiles.length > 0) {
   fail(`restricted publish payload:\n${restrictedPublishableFiles.join("\n")}`);
 }
@@ -228,28 +185,17 @@ if (publishableBytes > policy.maximumBytes) {
   fail(`publish payload is unexpectedly large (${publishableBytes} bytes)`);
 }
 
-const builtJavaScriptFiles = publishableFiles.filter(
-  (path) => path.startsWith("dist/") && path.endsWith(".js"),
-);
+const builtJavaScriptFiles = publishableFiles.filter((path) => path.startsWith("dist/") && path.endsWith(".js"));
 if (builtJavaScriptFiles.length === 0) {
   fail("package has no built JavaScript");
 }
-const importPattern =
-  /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s*)["']([^"']+)["']/gu;
+const importPattern = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s*)["']([^"']+)["']/gu;
 const externalImports = new Set();
-for (const path of repositoryFiles.filter(
-  (path) =>
-    path.startsWith("src/") &&
-    path.endsWith(".ts"),
-)) {
+for (const path of repositoryFiles.filter((path) => path.startsWith("src/") && path.endsWith(".ts"))) {
   const source = await readFile(resolve(root, path), "utf8");
   for (const match of source.matchAll(importPattern)) {
     const specifier = match[1];
-    if (
-      specifier &&
-      !specifier.startsWith(".") &&
-      !allowedRuntimeImports.has(specifier)
-    ) {
+    if (specifier && !specifier.startsWith(".") && !allowedRuntimeImports.has(specifier)) {
       fail(`unexpected source runtime import in ${path}: ${specifier}`);
     }
   }
@@ -262,18 +208,12 @@ for (const path of builtJavaScriptFiles) {
       externalImports.add(specifier);
     }
   }
-  if (
-    /Live2D Cubism (?:Core|SDK)|Spine Runtimes License Agreement/iu.test(
-      source,
-    )
-  ) {
+  if (/Live2D Cubism (?:Core|SDK)|Spine Runtimes License Agreement/iu.test(source)) {
     fail(`restricted vendor runtime fingerprint in ${path}`);
   }
 }
 
-const unexpectedImports = [...externalImports].filter(
-  (specifier) => !allowedRuntimeImports.has(specifier),
-);
+const unexpectedImports = [...externalImports].filter((specifier) => !allowedRuntimeImports.has(specifier));
 if (unexpectedImports.length > 0) {
   fail(`unexpected runtime imports: ${unexpectedImports.join(", ")}`);
 }
@@ -286,9 +226,7 @@ const forbiddenAltairFeatureImports = [...externalImports].filter(
     specifier.startsWith("@haneoka/altair/validation"),
 );
 if (forbiddenAltairFeatureImports.length > 0) {
-  fail(
-    `Altair feature implementation imports are forbidden: ${forbiddenAltairFeatureImports.join(", ")}`,
-  );
+  fail(`Altair feature implementation imports are forbidden: ${forbiddenAltairFeatureImports.join(", ")}`);
 }
 
 console.log(
