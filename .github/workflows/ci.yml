@@ -27,7 +27,7 @@ jobs:
         with:
           repository: haneoka-gakuen/altair
           path: altair-plugin-vega-preview/.dependencies/altair
-          ref: cd4e44d0670df22fe2e8f8ae3ebab3ab8365766d
+          ref: 4bac2d08fbfd9872d7f77f18e3dc6f5612c07923
 
       - name: Check out Altair ADV plugin
         uses: actions/checkout@v7
