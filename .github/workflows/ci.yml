@@ -88,6 +88,8 @@ jobs:
           ref: 33a9127d9537cc5c303fceaa35fafda403713b42
           path: altair-plugin-vega-preview/.dependencies/vega-renderer-three
           persist-credentials: false
+      - name: Set up locked Vega Rust and WASM tools
+        uses: ./altair-plugin-vega-preview/.dependencies/vega/.github/actions/setup-wasm
 
       - name: Install dependencies
         working-directory: altair-plugin-vega-preview
