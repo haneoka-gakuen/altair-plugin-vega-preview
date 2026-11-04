@@ -124,7 +124,7 @@ export function canonicalizeNativeWorkspace(
   registry: AltairDocumentRegistry,
 ): AltairAuthoredWorkspace {
   if (isCanonicalNativeWorkspace(workspace)) return workspace;
-  const source = registry.compile(workspace);
+  const source = registry.compileDraft(workspace);
   const compiled = {
     ...source,
     runtime: { ...source.runtime, presentation: { ...object(source.runtime.presentation), mode: "our-notes" } },
