@@ -8,6 +8,7 @@ import type {
 import {
   compileStoryProjectForVegaPreview,
   compileVegaProjectWithDiagnostics,
+  projectVegaSceneToAdvStory,
   type AltairAdvCompiler,
   type CompileVegaPreviewStoryResult,
   type CompileVegaProjectResult,
@@ -34,13 +35,14 @@ export const compileVegaScene = async (
   compiler: AltairAdvCompiler = altairAdvService,
 ): Promise<AltairVegaCompiledScene> => {
   throwIfAborted(request.signal);
-  const compiled = compiler.compile(request.project, request.sceneId ?? request.project.entrySceneId);
+  const sceneId = request.sceneId ?? request.project.entrySceneId;
+  const compiled = compileVegaProjectWithDiagnostics(request.project, {}, compiler);
   throwIfAborted(request.signal);
   return Object.freeze({
-    story: Object.freeze(cloneStoryValue(compiled.story)) as AltairVegaCompiledScene["story"],
+    story: Object.freeze(projectVegaSceneToAdvStory(compiled.project, sceneId)) as AltairVegaCompiledScene["story"],
     diagnostics: Object.freeze(cloneStoryValue(compiled.diagnostics)),
-    sceneId: compiled.sceneId,
-    commandSourceIndexes: Object.freeze([...compiled.commandSourceIndexes]),
+    sceneId,
+    commandSourceIndexes: Object.freeze([...compiled.sourceMap[sceneId]!.commandSourceIndexes]),
   });
 };
 
@@ -100,7 +102,9 @@ const compileCommand = async (
     sceneId: request.sceneId,
     signal: request.signal,
   });
-  const compiledIndex = compiled.commandSourceIndexes.indexOf(request.commandIndex);
+  const identityIndex = compiled.story.commands.findIndex((command) => command.commandId === request.command.id);
+  const compiledIndex =
+    identityIndex >= 0 ? identityIndex : compiled.commandSourceIndexes.indexOf(request.commandIndex);
   const nativeCommand = compiledIndex < 0 ? undefined : compiled.story.commands[compiledIndex];
   const output =
     nativeCommand === undefined

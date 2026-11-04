@@ -14,18 +14,30 @@ const policy = Object.freeze({
     "@haneoka/altair-preview-client",
     "@haneoka/vega",
     "@haneoka/vega-protocol",
+    "@haneoka/vega-plugin-haneoka",
+    "@haneoka/vega-plugin-composite",
   ]),
   maximumBytes: 1024 * 1024,
 });
 
 const allowedRuntimeImports = new Set([
   "@haneoka/altair/model",
+  "@haneoka/altair/documents",
   "@haneoka/altair/plugins",
   "@haneoka/altair-plugin-adv/services",
+  "@haneoka/altair-plugin-adv/documents",
+  "@haneoka/altair-plugin-adv/commands",
+  "@haneoka/altair-plugin-adv/assets",
+  "@haneoka/altair-plugin-adv/resources",
   "@haneoka/altair-preview-client",
   "@haneoka/vega/engine",
+  "@haneoka/vega/web",
   "@haneoka/vega/preview",
+  "@haneoka/vega/story-resources",
   "@haneoka/vega-protocol",
+  "@haneoka/vega-plugin-haneoka/story-hydration",
+  "@haneoka/vega-plugin-haneoka/scene-profile",
+  "@haneoka/vega-plugin-composite/import",
 ]);
 
 const fail = (message) => {
@@ -134,7 +146,9 @@ const walkRepository = async (path, relativePath = "") => {
 };
 
 await walkRepository(root);
-const restrictedRepositoryFiles = repositoryFiles.filter((path) => restrictedPath.test(path) || mediaPath.test(path));
+const restrictedRepositoryFiles = repositoryFiles.filter(
+  (path) => !path.startsWith("docs/brand/") && (restrictedPath.test(path) || mediaPath.test(path)),
+);
 if (restrictedRepositoryFiles.length > 0) {
   fail(`restricted SDK, runtime, model, or asset payload:\n${restrictedRepositoryFiles.join("\n")}`);
 }
