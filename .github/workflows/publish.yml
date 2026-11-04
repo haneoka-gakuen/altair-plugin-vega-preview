@@ -24,29 +24,34 @@ jobs:
         with:
           repository: haneoka-gakuen/altair
           path: altair-plugin-vega-preview/.dependencies/altair
+          ref: cd4e44d0670df22fe2e8f8ae3ebab3ab8365766d
 
       - name: Check out Vega
         uses: actions/checkout@v7
         with:
           repository: haneoka-gakuen/vega
           path: altair-plugin-vega-preview/.dependencies/vega
+          ref: 2fa1b39c1176852db38a45b453c737e8e3439f5d
 
       - name: Check out portable Vega UI
         uses: actions/checkout@v7
         with:
           repository: haneoka-gakuen/vega-ui-portable
           path: altair-plugin-vega-preview/.dependencies/vega-ui-portable
+          ref: 06af193c1c7c7939394469aec5e7cfa7e71b220d
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: haneoka-gakuen/vega-plugin-richtext
           path: altair-plugin-vega-preview/.dependencies/vega-plugin-richtext
           persist-credentials: false
+          ref: c043823cbb2c63a6966343db2e9ef0fb8ba4b703
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: haneoka-gakuen/altair-plugin-adv
           path: altair-plugin-vega-preview/.dependencies/altair-plugin-adv
           persist-credentials: false
+          ref: bfc4061296dfa589b6b8d586a369b3ff445c340d
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
         with:
@@ -58,6 +63,27 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
+      - name: Check out vega-plugin-haneoka
+        uses: actions/checkout@v7
+        with:
+          repository: haneoka-gakuen/vega-plugin-haneoka
+          ref: d02da4c16eee7413dbc07ade34ac288d05926456
+          path: altair-plugin-vega-preview/.dependencies/vega-plugin-haneoka
+          persist-credentials: false
+      - name: Check out vega-plugin-composite
+        uses: actions/checkout@v7
+        with:
+          repository: haneoka-gakuen/vega-plugin-composite
+          ref: 5c151e08ee4e8cad9a0fbd98e97d06260b507b66
+          path: altair-plugin-vega-preview/.dependencies/vega-plugin-composite
+          persist-credentials: false
+      - name: Check out vega-renderer-three
+        uses: actions/checkout@v7
+        with:
+          repository: haneoka-gakuen/vega-renderer-three
+          ref: 33a9127d9537cc5c303fceaa35fafda403713b42
+          path: altair-plugin-vega-preview/.dependencies/vega-renderer-three
+          persist-credentials: false
 
       - name: Install dependencies
         working-directory: altair-plugin-vega-preview
@@ -78,6 +104,12 @@ jobs:
       - name: Build Altair
         working-directory: altair-plugin-vega-preview
         run: pnpm --filter @haneoka/altair build:core
+      - name: Build additional pinned SDK dependencies
+        working-directory: altair-plugin-vega-preview
+        run: |-
+          pnpm --filter @haneoka/vega-plugin-haneoka build
+          pnpm --filter @haneoka/vega-renderer-three build
+          pnpm --filter @haneoka/vega-plugin-composite build
 
       - name: Check package
         working-directory: altair-plugin-vega-preview
@@ -87,7 +119,9 @@ jobs:
         working-directory: altair-plugin-vega-preview
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: node -e 'const p=require("./package.json"); if(process.env.RELEASE_TAG !== `v${p.version}`) throw new Error(`Release ${process.env.RELEASE_TAG} does not match v${p.version}`)'
+        run: node -e 'const p=require("./package.json"); if(process.env.RELEASE_TAG !==
+          `v${p.version}`) throw new Error(`Release ${process.env.RELEASE_TAG}
+          does not match v${p.version}`)'
 
       - name: Publish package
         working-directory: altair-plugin-vega-preview
