@@ -2,7 +2,8 @@ import { cloneStoryValue, type JsonObject, type JsonValue } from "@haneoka/altai
 import type { AltairPreviewRequest, AltairPreviewSession } from "@haneoka/altair/plugins";
 import { AltairPreviewClient } from "@haneoka/altair-preview-client";
 import { altairAdvService } from "@haneoka/altair-plugin-adv/services";
-import { VegaEngine, type VegaPlugin } from "@haneoka/vega/engine";
+import type { VegaPlugin } from "@haneoka/vega/engine";
+import { VegaEngine } from "@haneoka/vega/web";
 import { VegaPreviewRuntime } from "@haneoka/vega/preview";
 import {
   VEGA_PREVIEW_PROTOCOL,
@@ -30,6 +31,7 @@ const DEFAULT_TIMEOUT_MS = 8_000;
 interface NormalizedOptions {
   readonly defaultMountId: string;
   readonly timeoutMs: number;
+  readonly sceneTimeoutMs: number;
   readonly officialPlugins: readonly VegaPlugin[];
   readonly plugins: readonly VegaPlugin[];
   readonly theme?: string | false;
@@ -145,6 +147,7 @@ const defaultRuntimeFactory = (options: AltairVegaPreviewPluginOptions): Normali
       });
       throwIfAborted(context.signal);
       const runtime = new VegaPreviewRuntime({
+        externalPlaybackControls: options.externalPlaybackControls ?? false,
         identity: context.identity,
         mount: context.mount,
         port: context.port,
@@ -188,6 +191,7 @@ const normalizeOptions = (options: AltairVegaPreviewPluginOptions): NormalizedOp
     "Altair Vega default mount id",
   );
   const timeoutMs = positiveInteger(options.timeoutMs ?? DEFAULT_TIMEOUT_MS, "Altair Vega preview timeout");
+  const sceneTimeoutMs = positiveInteger(options.sceneTimeoutMs ?? 120_000, "Altair Vega scene timeout");
   if (options.createRuntime !== undefined && typeof options.createRuntime !== "function") {
     throw new TypeError("Altair Vega createRuntime must be a function");
   }
@@ -206,6 +210,7 @@ const normalizeOptions = (options: AltairVegaPreviewPluginOptions): NormalizedOp
   return Object.freeze({
     defaultMountId,
     timeoutMs,
+    sceneTimeoutMs,
     officialPlugins: Object.freeze([...(options.officialPlugins ?? [])]),
     plugins: Object.freeze([...(options.plugins ?? [])]),
     ...(theme === undefined ? {} : { theme }),
@@ -308,6 +313,7 @@ const capabilityList = (capabilities: VegaPreviewCapabilities): readonly string[
     ...(capabilities.revisionCancellation ? ["revision-cancellation"] : []),
     ...(capabilities.debugging ? ["debugging"] : []),
     ...(capabilities.stageTransforms ? ["stage-transforms"] : []),
+    ...(capabilities.modelDefinitions ? ["model-definitions"] : []),
   ]);
 
 const asJsonValue = (value: unknown): JsonValue => cloneStoryValue(value) as JsonValue;
@@ -529,6 +535,7 @@ class VegaPreviewService implements AltairVegaPreviewService {
         identity,
         port: activeChannel.port2,
         timeoutMs: this.options.timeoutMs,
+        sceneTimeoutMs: this.options.sceneTimeoutMs,
         ...(backgroundErrorHandler
           ? {
               onListenerError: (error: unknown) => reportBackgroundError(backgroundErrorHandler, error),

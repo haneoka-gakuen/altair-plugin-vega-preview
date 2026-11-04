@@ -8,6 +8,10 @@ packages:
   - ".dependencies/vega-plugin-richtext"
   - ".dependencies/vega-ui-portable"
 
+  - ".dependencies/vega-plugin-haneoka"
+
+  - ".dependencies/vega-plugin-composite"
+
 linkWorkspacePackages: true
 
 allowBuilds:

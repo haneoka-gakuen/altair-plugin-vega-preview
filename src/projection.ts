@@ -1,9 +1,18 @@
-import { isVegaCommandType } from "@haneoka/vega-protocol";
+import { STORY_CHARACTER_MODELS_KEY, resolveStoryCharacterModels } from "@haneoka/vega/story-resources";
+import type { AdvStory } from "@haneoka/vega/story-resources";
+import { assertVegaProject, isVegaCommandType } from "@haneoka/vega-protocol";
+import { prepareStoryPresentation, PRESENTATION_ORIGIN, validateStoryboard } from "./presentation.js";
+import { hydrateStoryPayload } from "@haneoka/vega-plugin-haneoka/story-hydration";
+export * from "./presentation.js";
+export * from "./native-authoring.js";
 import { cloneStoryValue, type JsonObject, type JsonValue, type StoryProject } from "@haneoka/altair/model";
 import { altairAdvService, type AltairAdvService } from "@haneoka/altair-plugin-adv/services";
+import { findAdvProjectAsset } from "@haneoka/altair-plugin-adv/assets";
+import { storyResourceAliases } from "@haneoka/altair-plugin-adv/resources";
 import {
   VEGA_ADV_OPCODE,
   VEGA_SYSTEM_OPCODE,
+  VEGA_PROJECT_LOCALIZATION_METADATA_KEY,
   type VegaAsset,
   type VegaCommand,
   type VegaJsonValue,
@@ -195,12 +204,14 @@ const assetSource = (entry: JsonObject): string | undefined =>
   firstString(
     entry.source,
     entry.url,
-    entry.sourcePath,
-    entry.runtimePath,
+    entry.playableUrl,
     entry.modelUrl,
     entry.imageUrl,
     entry.model,
     entry.moc,
+    record(entry.runtime)?.model,
+    record(entry.runtime)?.moc,
+    entry.runtimePath,
   );
 
 const externalAssetSource = (source: string): boolean => /^https?:\/\//i.test(source);
@@ -258,14 +269,23 @@ const convertStoryAssets = (
   return Object.keys(converted).length ? converted : undefined;
 };
 
-const directAssetField = (key: string): boolean => {
+export const storyResourceDirectoryField = (key: string): boolean =>
+  /^(?:dataRoots?(?:ByWindowAsset)?|commonSpritesRoot|lineRoot)$/iu.test(key);
+
+export const storyResourceMetadataField = (key: string): boolean =>
+  /^(?:sourceMetadata|provenance|scope|resourceRef)$/iu.test(key) ||
+  /(?:source|output)path$/iu.test(key.replace(/[^a-z0-9]/giu, ""));
+
+export const directAssetField = (key: string): boolean => {
   const normalized = key.replace(/[^a-z0-9]/gi, "").toLowerCase();
+  if (storyResourceMetadataField(key) || storyResourceDirectoryField(key)) return false;
   return (
     normalized === "source" ||
     normalized === "src" ||
     normalized === "url" ||
     normalized === "uri" ||
     normalized === "path" ||
+    normalized === "file" ||
     normalized === "bgmid" ||
     normalized === "bgmref" ||
     normalized === "seid" ||
@@ -276,6 +296,23 @@ const directAssetField = (key: string): boolean => {
     normalized === "live2dkey" ||
     normalized === "model" ||
     normalized === "moc" ||
+    normalized.endsWith("image") ||
+    normalized.endsWith("texture") ||
+    normalized.endsWith("textures") ||
+    [
+      "skeleton",
+      "skeletonurl",
+      "skel",
+      "json",
+      "atlas",
+      "atlasurl",
+      "textures",
+      "texture",
+      "physics",
+      "pose",
+      "motionsync",
+      "userdata",
+    ].includes(normalized) ||
     normalized === "targetassetname" ||
     normalized.endsWith("url") ||
     normalized.endsWith("uri") ||
@@ -285,6 +322,7 @@ const directAssetField = (key: string): boolean => {
     normalized.endsWith("assetname") ||
     normalized.endsWith("assetref") ||
     normalized.endsWith("imageref") ||
+    normalized.endsWith("portraitref") ||
     normalized.endsWith("audioref") ||
     normalized.endsWith("videoref") ||
     normalized.endsWith("voiceref") ||
@@ -298,11 +336,11 @@ const directAssetField = (key: string): boolean => {
   );
 };
 
-const directAssetLocation = (value: string): boolean =>
+export const directAssetLocation = (value: string): boolean =>
   /^(?:https?:\/\/|blob:|file:|\/|\.{1,2}\/)/i.test(value) ||
   value.includes("/") ||
   value.includes("\\") ||
-  /\.(?:avif|bmp|gif|jpe?g|png|svg|webp|aac|flac|m4a|mp3|oga|ogg|opus|wav|m4v|mp4|ogv|webm|json|moc3|model3|bin|ttf|otf|woff2?)(?:[?#].*)?$/i.test(
+  /\.(?:avif|bmp|gif|jpe?g|png|svg|webp|aac|flac|m4a|mp3|oga|ogg|opus|wav|m4v|mp4|ogv|webm|jsonl?|moc3?|model3?|skel|atlas|mtn|wmdl|bytes|bin|ttf|otf|woff2?)(?:[?#].*)?$/i.test(
     value,
   );
 
@@ -329,6 +367,7 @@ const directAssetReferences = (command: VegaCommand): DirectAssetReference[] => 
     }
     if (!value || typeof value !== "object") return;
     for (const [key, entry] of Object.entries(value)) {
+      if (storyResourceMetadataField(key) || storyResourceDirectoryField(key)) continue;
       visit(entry, `${path}${jsonPathMember(key)}`, resourceContext || directAssetField(key));
     }
   };
@@ -346,21 +385,60 @@ const compileVegaSceneProjection = (
   diagnostics: StoryDiagnostic[],
   compiler: AltairAdvCompiler,
   precompiled?: AdvCompileResult,
+  originalProject: StoryProject = project,
 ): { scene: VegaScene; sourceMap: VegaSceneSourceMap } => {
   const sourceScene = project.scenes.find((scene) => scene.id === sceneId);
   if (!sourceScene) {
     throw new RangeError(`Story scene '${sceneId}' does not exist`);
   }
   const compiled = precompiled ?? compiler.compile(project, sceneId);
-  diagnostics.push(...compiled.diagnostics);
+  const bound = hydrateStoryPayload(compiled.story, {
+    missingResource: "omit",
+    resourceAliases: altairAdvService.storyResourceAliases,
+    applyHaneokaMotionAliases: !["webgal", "bestdori-scenario", "sekai-scenario"].includes(
+      String(project.meta.provenance?.format ?? ""),
+    ),
+    onMissingResource: (resource) =>
+      diagnostics.push(
+        storyDiagnostic(
+          "error",
+          "resource.unresolved",
+          `$.scenes[${project.scenes.indexOf(sourceScene)}]`,
+          `${resource.kind}: ${resource.reference}`,
+          "unsupported",
+        ),
+      ),
+  });
+  const originalCommands = originalProject.scenes.find((scene) => scene.id === sceneId)!.commands;
+  const originalIndexes = new Map(originalCommands.map((command, index) => [command.id, index]));
+  const originalIndexOf = (
+    command: StoryProject["scenes"][number]["commands"][number] | undefined,
+    fallback: number,
+  ) =>
+    command
+      ? (originalIndexes.get(command.id) ??
+        originalIndexes.get(String(command.extensions[PRESENTATION_ORIGIN])) ??
+        fallback)
+      : fallback;
+  diagnostics.push(
+    ...compiled.diagnostics.map((diagnostic) => ({
+      ...diagnostic,
+      path: diagnostic.path.replace(
+        /(\.commands\[)(\d+)(\])/u,
+        (_match, prefix: string, index: string, suffix: string) =>
+          `${prefix}${originalIndexOf(sourceScene.commands[Number(index)], Number(index))}${suffix}`,
+      ),
+    })),
+  );
 
   const commands: VegaCommand[] = [];
   const commandIds: string[] = [];
   const commandSourceIndexes: number[] = [];
-  for (const [compiledIndex, value] of compiled.story.commands.entries()) {
+  for (const [compiledIndex, value] of (bound.commands as JsonObject[]).entries()) {
     const sourceIndex = compiled.commandSourceIndexes[compiledIndex];
     if (sourceIndex === undefined) continue;
     const sourceCommand = sourceScene.commands[sourceIndex];
+    const sourcePathIndex = originalIndexOf(sourceCommand, sourceIndex);
     const opcode = value.command;
     if (
       !sourceCommand ||
@@ -370,7 +448,7 @@ const compileVegaSceneProjection = (
         storyDiagnostic(
           "warning",
           "vega.command.omitted",
-          `$.scenes[${project.scenes.indexOf(sourceScene)}].commands[${sourceIndex}]`,
+          `$.scenes[${project.scenes.indexOf(sourceScene)}].commands[${sourcePathIndex}]`,
           "The command remains in Altair authoring metadata but cannot be emitted as a Vega runtime command",
           "unsupported",
           sourceCommand?.source?.line,
@@ -379,6 +457,7 @@ const compileVegaSceneProjection = (
       continue;
     }
     const command = cloneStoryValue(value);
+    if (typeof command.key === "string" && !command.key.trim()) delete command.key;
     if (
       Object.hasOwn(command, "index") &&
       (typeof command.index !== "number" || !Number.isSafeInteger(command.index) || command.index < 0)
@@ -388,7 +467,7 @@ const compileVegaSceneProjection = (
         storyDiagnostic(
           "warning",
           "vega.command.index-normalized",
-          `$.scenes[${project.scenes.indexOf(sourceScene)}].commands[${sourceIndex}].index`,
+          `$.scenes[${project.scenes.indexOf(sourceScene)}].commands[${sourcePathIndex}].index`,
           "A non-numeric source index was preserved in authoring metadata and omitted from Vega runtime data",
           "approximate",
           sourceCommand.source?.line,
@@ -403,7 +482,7 @@ const compileVegaSceneProjection = (
         storyDiagnostic(
           "warning",
           "vega.command.direct-asset-location",
-          `$.scenes[${project.scenes.indexOf(sourceScene)}].commands[${sourceIndex}]${reference.path}`,
+          `$.scenes[${project.scenes.indexOf(sourceScene)}].commands[${sourcePathIndex}]${reference.path}`,
           networkDependent
             ? "A direct asset URL remains network-dependent; Deneb packages only top-level Vega assets"
             : "A direct asset path remains inside command data; Deneb packages and rewrites only top-level Vega assets, so offline inclusion is not guaranteed",
@@ -412,15 +491,17 @@ const compileVegaSceneProjection = (
         ),
       );
     }
-    commandIds.push(sourceCommand.id);
-    commandSourceIndexes.push(sourceIndex);
+    const origin = sourceCommand.extensions[PRESENTATION_ORIGIN];
+    const originalIndex = originalIndexes.get(sourceCommand.id) ?? originalIndexes.get(String(origin))!;
+    const sourceId = originalCommands[originalIndex]!.id;
+    commandIds.push(sourceId);
+    commandSourceIndexes.push(originalIndex);
   }
 
   const emitted = new Set(commandIds);
-  const omittedCommandIds = sourceScene.commands
-    .filter((command) => !emitted.has(command.id))
-    .map((command) => command.id);
+  const omittedCommandIds = originalCommands.filter((command) => !emitted.has(command.id)).map((command) => command.id);
   const metadata: Record<string, VegaJsonValue> = {
+    ...sourceScene.extensions,
     "altair:commandIds": commandIds,
     "altair:commandSourceIndexes": commandSourceIndexes,
     "altair:extensions": json(sourceScene.extensions),
@@ -467,6 +548,63 @@ const explicitPluginsForVega = (
 ): readonly VegaProjectPlugin[] =>
   plugins.filter((plugin) => pluginTargetsVega(plugin, isAuthoringPlugin)).map((plugin) => cloneStoryValue(plugin));
 
+/** Store model catalogues once; source metadata stays in the authoring snapshot. */
+function internCharacterModels(scenes: Record<string, VegaScene>): JsonObject {
+  const models: JsonObject = {},
+    identities = new Map<string, string>();
+  const portable = (value: JsonValue): JsonValue => {
+    if (Array.isArray(value)) return value.map(portable);
+    if (!value || typeof value !== "object") return value;
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([key]) => !["sourceMetadata", "provenance", "archiveSource"].includes(key))
+        .map(([key, child]) => [key, portable(child)]),
+    );
+  };
+  const visit = (value: JsonObject): JsonObject => {
+    const result = { ...value },
+      model = record(result.characterModel);
+    if (typeof result.key === "string" && !result.key.trim()) delete result.key;
+    if (model) {
+      const definition = portable(model) as JsonObject,
+        serialized = JSON.stringify(definition);
+      let id = identities.get(serialized);
+      if (!id) {
+        id = `model-${identities.size + 1}`;
+        identities.set(serialized, id);
+        models[id] = definition;
+      }
+      delete result.characterModel;
+      result.characterModelRef = id;
+    }
+    const group = record(result.commandGroup);
+    if (group && Array.isArray(group.actions))
+      result.commandGroup = {
+        ...group,
+        actions: group.actions.map((value) => {
+          const action = record(value);
+          return action && record(action.command) ? { ...action, command: visit(action.command as JsonObject) } : value;
+        }),
+      };
+    const timeline = record(result.timeline);
+    if (timeline && Array.isArray(timeline.signals))
+      result.timeline = {
+        ...timeline,
+        signals: timeline.signals.map((value) => {
+          const signal = record(value);
+          return signal && record(signal.episode) ? { ...signal, episode: visit(signal.episode as JsonObject) } : value;
+        }),
+      };
+    return result;
+  };
+  for (const [id, scene] of Object.entries(scenes))
+    scenes[id] = {
+      ...scene,
+      commands: scene.commands.map((command) => visit(command as unknown as JsonObject) as unknown as VegaCommand),
+    };
+  return models;
+}
+
 /**
  * Compile Altair's lossless authoring model into Vega's portable project
  * contract. Every scene is compiled; opaque source data remains recoverable
@@ -477,8 +615,20 @@ export const compileVegaProjectWithDiagnostics = (
   options: CompileVegaProjectOptions = {},
   compiler: AltairAdvCompiler = altairAdvService,
 ): CompileVegaProjectResult => {
+  const originalProject = project;
+  project = prepareStoryPresentation(project);
   const entryCompiled = compiler.compile(project, project.entrySceneId);
-  const diagnostics: StoryDiagnostic[] = [];
+  const diagnostics: StoryDiagnostic[] = originalProject.scenes.flatMap((scene) =>
+    validateStoryboard(scene).map((issue) =>
+      storyDiagnostic(
+        "error",
+        "presentation.invalid-shot",
+        `$.scenes.${scene.id}.extensions["haneoka.storyboard"].${issue.shotId}`,
+        issue.message,
+        "unsupported",
+      ),
+    ),
+  );
   const scenes: Record<string, VegaScene> = {};
   const sourceMap: Record<string, VegaSceneSourceMap> = {};
   for (const scene of project.scenes) {
@@ -488,12 +638,16 @@ export const compileVegaProjectWithDiagnostics = (
       diagnostics,
       compiler,
       scene.id === project.entrySceneId ? entryCompiled : undefined,
+      originalProject,
     );
     scenes[scene.id] = compiled.scene;
     sourceMap[scene.id] = compiled.sourceMap;
   }
 
+  const characterModels = internCharacterModels(scenes);
   const metadata: Record<string, VegaJsonValue> = {
+    ...record(record(project.extensions.vegaSource)?.metadata),
+    ...(Object.keys(characterModels).length ? { [STORY_CHARACTER_MODELS_KEY]: characterModels as VegaJsonValue } : {}),
     "altair:storyProjectVersion": project.version,
     [ALTAIR_VEGA_METADATA_KEYS.assets]: json(project.assets),
     [ALTAIR_VEGA_METADATA_KEYS.runtime]: json(project.runtime),
@@ -505,6 +659,19 @@ export const compileVegaProjectWithDiagnostics = (
   }
   if (project.meta.locale !== undefined) {
     metadata.locale = project.meta.locale;
+  }
+  const locales = project.extensions.altairProjectLocales;
+  if (Array.isArray(locales) && locales.length) {
+    const previous = record(metadata[VEGA_PROJECT_LOCALIZATION_METADATA_KEY] as JsonValue),
+      languages = Array.isArray(previous?.languages) ? previous.languages : [];
+    metadata[VEGA_PROJECT_LOCALIZATION_METADATA_KEY] = {
+      version: 1,
+      languages: locales.map((tag) => languages.find((language) => record(language)?.tag === tag) ?? { tag }),
+      defaultLanguage: project.meta.locale ?? locales[0]!,
+      ...(previous?.fallbackLanguage && locales.includes(previous.fallbackLanguage)
+        ? { fallbackLanguage: previous.fallbackLanguage }
+        : {}),
+    } as VegaJsonValue;
   }
   if (project.meta.releaseServer !== undefined) {
     metadata.releaseServer = project.meta.releaseServer;
@@ -519,10 +686,14 @@ export const compileVegaProjectWithDiagnostics = (
     metadata["altair:metaExtra"] = json(project.meta.extra);
   }
   if (options.preserveAuthoringSource !== false) {
-    metadata[ALTAIR_VEGA_METADATA_KEYS.authoringSource] = json(project as unknown as JsonValue);
+    metadata[ALTAIR_VEGA_METADATA_KEYS.authoringSource] = json(originalProject as unknown as JsonValue);
   }
 
-  const convertedAssets = options.assets ?? convertStoryAssets(project, diagnostics);
+  const importedVega = record(project.extensions.vegaSource);
+  const convertedAssets =
+    options.assets ??
+    (importedVega?.assets as Record<string, VegaAsset> | undefined) ??
+    convertStoryAssets(project, diagnostics);
   if (Object.keys(project.assets).length) {
     diagnostics.push(
       storyDiagnostic(
@@ -560,14 +731,14 @@ export const compileVegaProjectWithDiagnostics = (
               }),
           ...(options.engineFeatures?.length ? { features: [...options.engineFeatures] } : {}),
         }
-      : undefined;
+      : (importedVega?.engine as VegaProject["engine"] | undefined);
   const plugins =
     options.plugins === undefined
       ? storyProjectPluginsForVega(project.plugins, options.isAuthoringPlugin)
       : explicitPluginsForVega(options.plugins, options.isAuthoringPlugin);
   const output: VegaProject = {
     format: "vega-project",
-    formatVersion: 1,
+    formatVersion: Object.keys(characterModels).length ? 2 : 1,
     id: options.projectId ?? defaultProjectId(project),
     title: project.meta.title,
     entryScene: project.entrySceneId,
@@ -577,6 +748,7 @@ export const compileVegaProjectWithDiagnostics = (
     ...(convertedAssets ? { assets: convertedAssets } : {}),
     ...(plugins.length ? { plugins } : {}),
   };
+  assertVegaProject(output);
   return { project: output, diagnostics, sourceMap };
 };
 
@@ -735,8 +907,9 @@ export const compileStoryProjectForVegaPreview = (
   const story: JsonObject = {
     ...portableStory,
     commands,
-    assets: cloneStoryValue(project.assets),
-    runtime: cloneStoryValue(project.runtime),
+    characterModels: cloneStoryValue(compiled.project.metadata![STORY_CHARACTER_MODELS_KEY] ?? {}) as JsonValue,
+    assets: cloneStoryValue(compiled.project.metadata![ALTAIR_VEGA_METADATA_KEYS.assets]!) as JsonValue,
+    runtime: cloneStoryValue(compiled.project.metadata![ALTAIR_VEGA_METADATA_KEYS.runtime]!) as JsonValue,
     ...(compiled.project.assets
       ? {
           vegaAssets: json(compiled.project.assets as unknown as JsonValue),
@@ -770,7 +943,7 @@ export const compileStoryProjectForVegaPreview = (
  * not an authoring-model round trip.
  */
 export const projectVegaSceneToAdvStory = (project: VegaProject, sceneId = project.entryScene): CompiledAdvStory => {
-  if (project.format !== "vega-project" || project.formatVersion !== 1) {
+  if (project.format !== "vega-project" || (project.formatVersion !== 1 && project.formatVersion !== 2)) {
     throw new TypeError("Unsupported Vega project format");
   }
   const scene = project.scenes[sceneId];
@@ -796,20 +969,137 @@ export const projectVegaSceneToAdvStory = (project: VegaProject, sceneId = proje
   };
   if (assets) story.assets = cloneStoryValue(assets);
   if (runtime) story.runtime = cloneStoryValue(runtime);
-  return story;
+  const models = projectionRecord(STORY_CHARACTER_MODELS_KEY);
+  if (models) story.characterModels = cloneStoryValue(models);
+  return resolveStoryCharacterModels(story as unknown as AdvStory) as unknown as CompiledAdvStory;
 };
 
-/** Restore the exact Altair model when a Vega project carries its snapshot. */
+/** Restore authored sources when available, otherwise import the runtime scene graph. */
 export const restoreStoryProjectFromVegaProject = (
   project: VegaProject,
   compiler: AltairAdvCompiler = altairAdvService,
 ): StoryProject => {
-  if (project.format !== "vega-project" || project.formatVersion !== 1) {
+  if (project.format !== "vega-project" || (project.formatVersion !== 1 && project.formatVersion !== 2)) {
     throw new TypeError("Unsupported Vega project format");
   }
   const source = project.metadata?.[ALTAIR_VEGA_METADATA_KEYS.authoringSource];
   if (!source) {
-    throw new TypeError("Vega project does not contain an Altair authoring snapshot");
+    const metadata = project.metadata ?? {};
+    const take = (key: string): JsonObject => record(metadata[key] as JsonValue) ?? {};
+    const runtime = take(ALTAIR_VEGA_METADATA_KEYS.runtime);
+    const bakedPresentation = record(runtime.presentation)?.mode === "our-notes";
+    const assets = cloneStoryValue(take(ALTAIR_VEGA_METADATA_KEYS.assets)),
+      modelDefinitions = take(STORY_CHARACTER_MODELS_KEY),
+      modelReferences = new Map<string, string>();
+    for (const [id, definition] of Object.entries(modelDefinitions)) {
+      const model = record(definition);
+      if (!model) continue;
+      const reference = storyResourceAliases("live2d", model).find((reference) => {
+        const match = findAdvProjectAsset({ assets }, reference, "live2d");
+        return match && JSON.stringify(match.entry) === JSON.stringify(model);
+      });
+      if (reference) modelReferences.set(id, reference);
+      else {
+        let identity = `vega-model-${id}`;
+        while (findAdvProjectAsset({ assets }, identity, "live2d")) identity += ".";
+        const value = { ...cloneStoryValue(model), resourceRef: identity };
+        if (Array.isArray(assets.live2d)) assets.live2d.push(value);
+        else if (record(assets.live2d)) (assets.live2d as JsonObject)[identity] = value;
+        else assets.live2d = [value];
+        modelReferences.set(id, identity);
+      }
+    }
+    const reuseModel = (command: JsonObject): JsonObject => {
+      const reference =
+        typeof command.characterModelRef === "string" ? modelReferences.get(command.characterModelRef) : undefined;
+      const result = { ...command };
+      if (reference) {
+        delete result.characterModelRef;
+        result.live2dKey = reference;
+      }
+      const group = record(result.commandGroup);
+      if (group && Array.isArray(group.actions))
+        result.commandGroup = {
+          ...group,
+          actions: group.actions.map((value) => {
+            const action = record(value);
+            return action && record(action.command)
+              ? { ...action, command: reuseModel(action.command as JsonObject) }
+              : value;
+          }),
+        };
+      const timeline = record(result.timeline);
+      if (timeline && Array.isArray(timeline.signals))
+        result.timeline = {
+          ...timeline,
+          signals: timeline.signals.map((value) => {
+            const signal = record(value);
+            return signal && record(signal.episode)
+              ? { ...signal, episode: reuseModel(signal.episode as JsonObject) }
+              : value;
+          }),
+        };
+      return result;
+    };
+    const restored: StoryProject = {
+      version: 2,
+      meta: {
+        title:
+          typeof project.title === "string" ? project.title : String(Object.values(project.title)[0] ?? project.id),
+        ...(typeof metadata.locale === "string" ? { locale: metadata.locale } : {}),
+        ...(typeof metadata.description === "string" ? { description: metadata.description } : {}),
+        provenance: { format: "vega-project", projectId: project.id },
+      },
+      entrySceneId: project.entryScene,
+      scenes: Object.values(project.scenes).map((scene) => {
+        const ids = new Set<string>();
+        const commands = resolveStoryCharacterModels({
+          commands: scene.commands.map((command) => reuseModel(command as unknown as JsonObject)),
+          characterModels: modelDefinitions,
+        } as unknown as AdvStory).commands as unknown as readonly VegaCommand[];
+        return {
+          id: scene.id,
+          name:
+            typeof scene.title === "string"
+              ? scene.title
+              : scene.title
+                ? String(Object.values(scene.title)[0] ?? scene.id)
+                : scene.id,
+          commands: commands.map((value, index) => {
+            const { command, commandId, index: _index, ...fields } = value;
+            let id = typeof commandId === "string" ? commandId : `${scene.id}:${index + 1}`;
+            while (ids.has(id)) id += ".";
+            ids.add(id);
+            const restored = { id, command, fields: cloneStoryValue(fields) as JsonObject, extensions: {} };
+            return typeof command === "number"
+              ? altairAdvService.replaceStoryCommandNativeValue(restored, { command, ...restored.fields })
+              : restored;
+          }),
+          extensions: {
+            ...(cloneStoryValue(
+              Object.fromEntries(Object.entries(scene.metadata ?? {}).filter(([key]) => !key.startsWith("altair:"))),
+            ) as JsonObject),
+            ...(bakedPresentation ? { presentationBaked: true } : {}),
+          },
+        };
+      }),
+      assets: cloneStoryValue(assets),
+      runtime: cloneStoryValue(runtime),
+      storyFields: cloneStoryValue(take(ALTAIR_VEGA_METADATA_KEYS.storyFields)),
+      plugins: [...cloneStoryValue(project.plugins ?? [])],
+      extensions: {
+        ...take("altair:extensions"),
+        vegaSource: {
+          ...(project.engine ? { engine: cloneStoryValue(project.engine) as JsonObject } : {}),
+          ...(project.assets ? { assets: cloneStoryValue(project.assets) as unknown as JsonObject } : {}),
+          metadata: cloneStoryValue(
+            Object.fromEntries(Object.entries(metadata).filter(([key]) => !key.startsWith("altair:"))),
+          ) as JsonObject,
+        },
+      },
+    };
+    compiler.compile(restored, restored.entrySceneId);
+    return restored;
   }
   const restored = cloneStoryValue(source) as unknown as StoryProject;
   compiler.compile(restored, restored.entrySceneId);

@@ -6,7 +6,8 @@ import type {
   CompileVegaProjectResult,
   StoryDiagnostic,
 } from "./projection.js";
-import type { VegaEngine, VegaPlugin } from "@haneoka/vega/engine";
+import type { VegaPlugin } from "@haneoka/vega/engine";
+import type { VegaEngine } from "@haneoka/vega/web";
 import type { VegaPreviewIdentity } from "@haneoka/vega-protocol";
 
 export const ALTAIR_VEGA_PREVIEW_PLUGIN_ID = "haneoka.altair-vega-preview" as const;
@@ -94,8 +95,10 @@ export interface AltairVegaRuntimeHandle {
 }
 
 export interface AltairVegaPreviewPluginOptions {
+  readonly externalPlaybackControls?: boolean;
   readonly defaultMountId?: string;
   readonly timeoutMs?: number;
+  readonly sceneTimeoutMs?: number;
   readonly priority?: number;
   readonly officialPlugins?: readonly VegaPlugin[];
   readonly plugins?: readonly VegaPlugin[];
