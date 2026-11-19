@@ -338,8 +338,7 @@ export const directAssetField = (key: string): boolean => {
 
 export const directAssetLocation = (value: string): boolean =>
   /^(?:https?:\/\/|blob:|file:|\/|\.{1,2}\/)/i.test(value) ||
-  value.includes("/") ||
-  value.includes("\\") ||
+  /[/\\][^/\\?#]+\.[a-z][a-z0-9]*(?:[?#].*)?$/i.test(value) ||
   /\.(?:avif|bmp|gif|jpe?g|png|svg|webp|aac|flac|m4a|mp3|oga|ogg|opus|wav|m4v|mp4|ogv|webm|jsonl?|moc3?|model3?|skel|atlas|mtn|wmdl|bytes|bin|ttf|otf|woff2?)(?:[?#].*)?$/i.test(
     value,
   );
