@@ -273,7 +273,7 @@ export const storyResourceDirectoryField = (key: string): boolean =>
   /^(?:dataRoots?(?:ByWindowAsset)?|commonSpritesRoot|lineRoot)$/iu.test(key);
 
 export const storyResourceMetadataField = (key: string): boolean =>
-  /^(?:sourceMetadata|provenance|scope|resourceRef)$/iu.test(key) ||
+  /^(?:sourceMetadata|provenance|scope|resourceRef|externalPath)$/iu.test(key) ||
   /(?:source|output)path$/iu.test(key.replace(/[^a-z0-9]/giu, ""));
 
 export const directAssetField = (key: string): boolean => {
