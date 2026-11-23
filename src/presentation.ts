@@ -19,6 +19,7 @@ import {
   type JsonValue,
   type StoryProject,
   type StoryProjectCommand,
+  type StoryScene,
 } from "@haneoka/altair/model";
 
 export const PRESENTATION_KEY = "presentation";
@@ -204,14 +205,18 @@ function entryCharacters(project: StoryProject): ReadonlyMap<string, ReadonlyMap
   return incoming;
 }
 
-function nativeBlocking(project: StoryProject, preserveExitPositions = false): StoryProject {
+function nativeBlocking(project: StoryProject, preservePositions = false): StoryProject {
   const incoming = entryCharacters(project);
   const stage = HANEOKA_STAGE_GEOMETRY;
+  const stageSlots = [1, 3, 5, 7, 9];
+  const stageMarks = [...planHaneokaStageBlocking(stageSlots.map((order) => ({ target: String(order), order }))).values()]
+    .map(({ x }) => x - stage.characterFieldPosition.x);
   return {
     ...project,
     scenes: project.scenes.map((scene) => {
       const shown = new Map(incoming.get(scene.id));
       const placed = new Map<string, number>();
+      const nativeSlots = new Map(shown);
       const ids = new Set([...scene.commands, ...storyCommandAtoms(scene.commands)].map((command) => command.id));
       const uniqueId = (value: string) => {
         while (ids.has(value)) value += ".";
@@ -275,8 +280,9 @@ function nativeBlocking(project: StoryProject, preserveExitPositions = false): S
           for (const target of targets(source.fields)) {
             shown.delete(target);
             placed.delete(target);
+            nativeSlots.delete(target);
           }
-        if (leaving && preserveExitPositions) return [source];
+        if (leaving && preservePositions) return [source];
         const ordered = [...shown].sort((a, b) => a[1] - b[1]);
         const positions = new Map(
           [...planHaneokaStageBlocking(ordered.map(([target, order]) => ({ target, order })))].map(
@@ -289,6 +295,28 @@ function nativeBlocking(project: StoryProject, preserveExitPositions = false): S
           z: stage.characterFieldPosition.z + stage.characterBasePosition.z * stage.characterFieldScale,
         });
         const direct = entering || moving ? targets(source.fields).filter((target) => positions.has(target)) : [];
+        if (preservePositions) {
+          const occupied = new Map(
+            [...placed].filter(([target]) => shown.has(target) && (!moving || !direct.includes(target))),
+          );
+          for (const [target, x] of occupied) positions.set(target, x);
+          for (const target of direct) {
+            if (occupied.has(target)) continue;
+            const desired = positions.get(target)!;
+            const available = stageMarks.filter((x) => [...occupied.values()].every((other) => Math.abs(other - x) >= 0.65));
+            const x = [...occupied.values()].every((other) => Math.abs(other - desired) >= 0.65)
+              ? desired
+              : available.sort((a, b) => Math.abs(a - desired) - Math.abs(b - desired))[0] ?? desired;
+            positions.set(target, x);
+            occupied.set(target, x);
+            if (!nativeSlots.has(target)) {
+              const taken = new Set(nativeSlots.values());
+              const candidates = stageSlots.map((slot, index) => ({ slot, distance: Math.abs(stageMarks[index]! - x) }))
+                .filter(({ slot }) => !taken.has(slot)).sort((a, b) => a.distance - b.distance);
+              nativeSlots.set(target, candidates[0]?.slot ?? shown.get(target)!);
+            }
+          }
+        }
         const { key: _, ...unlabelled } = source.fields;
         const output: StoryProjectCommand[] = direct.length
           ? direct.map((target, index) => ({
@@ -303,13 +331,13 @@ function nativeBlocking(project: StoryProject, preserveExitPositions = false): S
                 ...(index ? unlabelled : source.fields),
                 targetName: target,
                 targets: [{ target }],
-                positionType: shown.get(target)!,
+                positionType: (preservePositions ? nativeSlots.get(target) : undefined) ?? shown.get(target)!,
                 characterWorldPosition: world(positions.get(target)!),
               },
             }))
           : [source];
         for (const [target, x] of positions) {
-          if (!direct.includes(target) && placed.get(target) !== x)
+          if (!preservePositions && !direct.includes(target) && placed.get(target) !== x)
             output.push({
               id: uniqueId(`presentation:${source.id}:blocking:${encodeURIComponent(target)}`),
               command: VEGA_ADV_OPCODE.MoveToDirection,
@@ -331,6 +359,79 @@ function nativeBlocking(project: StoryProject, preserveExitPositions = false): S
       return { ...scene, commands: scene.commands.flatMap(place) };
     }),
   };
+}
+
+function providerCastContinuity(scene: StoryScene): ReadonlyMap<string, StoryProjectCommand> {
+  const sequence = storyCommandAtoms(scene.commands);
+  const onStage = new Set<string>();
+  const castAfter = sequence.map((command) => {
+    if (command.command === VEGA_ADV_OPCODE.In) targets(command.fields).forEach((name) => onStage.add(name));
+    if (command.command === VEGA_ADV_OPCODE.Out) targets(command.fields).forEach((name) => onStage.delete(name));
+    return new Set(onStage);
+  });
+  const visibleModels = new Map<string, string>();
+  const changes = new Map<string, StoryProjectCommand>();
+  const boundaries = new Set<number>([
+    VEGA_ADV_OPCODE.Stage, VEGA_ADV_OPCODE.FadeOut, VEGA_ADV_OPCODE.FadeIn,
+    VEGA_ADV_OPCODE.Movie, VEGA_ADV_OPCODE.Clip, VEGA_ADV_OPCODE.GoTo, VEGA_ADV_OPCODE.ChoiceShow,
+    VEGA_SYSTEM_OPCODE.CallScene, VEGA_SYSTEM_OPCODE.JumpScene, VEGA_SYSTEM_OPCODE.Branch,
+  ]);
+  const adjacent = (index: number, step: number) => {
+    for (let i = index + step; i >= 0 && i < sequence.length; i += step) {
+      const item = sequence[i]!;
+      if (item.command === VEGA_ADV_OPCODE.Out) return true;
+      if (boundaries.has(Number(item.command)) || item.command === VEGA_ADV_OPCODE.Talk ||
+        (item.command === VEGA_ADV_OPCODE.Delay && Number(item.fields.duration) > 0)) return false;
+    }
+    return false;
+  };
+  const replacement = (source: StoryProjectCommand): StoryProjectCommand => {
+    const { key } = source.fields;
+    const { motionName, expressionName, fadeInSeconds } = object(source.fields.characterPresentation);
+    const acting = typeof motionName === "string" && motionName || typeof expressionName === "string" && expressionName;
+    return {
+      ...source,
+      command: acting ? VEGA_ADV_OPCODE.Motion : VEGA_ADV_OPCODE.Delay,
+      fields: {
+        ...(key === undefined ? {} : { key }),
+        ...(acting ? {
+          targetName: targets(source.fields)[0]!, motionName: motionName ?? "", expressionName: expressionName ?? "",
+          motionFadeIn: fadeInSeconds ?? 0,
+        } : { duration: 0 }),
+      },
+    };
+  };
+  for (const [index, command] of sequence.entries()) {
+    const [target, ...others] = targets(command.fields);
+    if (!target || others.length || command.fields.condition) continue;
+    if (command.command === VEGA_ADV_OPCODE.In && typeof command.fields.live2dKey === "string")
+      visibleModels.set(target, command.fields.live2dKey);
+    if (command.command !== VEGA_ADV_OPCODE.Out || adjacent(index, -1) || adjacent(index, 1)) continue;
+    const model = visibleModels.get(target);
+    if (!model || !castAfter[index - 1]?.has(target)) continue;
+    let lines = 0, insertedAnotherActor = false;
+    const reloads: StoryProjectCommand[] = [];
+    for (let look = index + 1; look < sequence.length; look++) {
+      const next = sequence[look]!;
+      if (boundaries.has(Number(next.command)) || next.fields.condition || castAfter[look]!.size > 5 ||
+        (!castAfter[look]!.has(target) && castAfter[look]!.size === 5)) break;
+      if (next.command === VEGA_ADV_OPCODE.Talk && ++lines > 2) break;
+      if (next.command === VEGA_ADV_OPCODE.Delay && Number(next.fields.duration) >= 1) break;
+      if (next.command === VEGA_ADV_OPCODE.Character && targets(next.fields).includes(target)) {
+        if (next.fields.live2dKey !== model || targets(next.fields).length !== 1) break;
+        reloads.push(next);
+      }
+      if (next.command !== VEGA_ADV_OPCODE.In) continue;
+      const names = targets(next.fields);
+      if (!names.includes(target)) { insertedAnotherActor = true; continue; }
+      if (names.length === 1 && insertedAnotherActor && next.fields.live2dKey === model) {
+        for (const kept of [command, ...reloads, next]) changes.set(kept.id, replacement(kept));
+        for (let i = index; i < look; i++) castAfter[i]!.add(target);
+      }
+      break;
+    }
+  }
+  return changes;
 }
 
 export function nativePresentationPolicy(
@@ -386,7 +487,9 @@ export function normalizeNativePresentation(project: StoryProject): StoryProject
 
 /** Normalize a provider's authored stage before the common director plans shots. */
 export function canonicalizeProviderStage(input: StoryProject): StoryProject {
-  const stripCamera = (command: StoryProjectCommand): StoryProjectCommand => {
+  const stripCamera = (command: StoryProjectCommand, cast: ReadonlyMap<string, StoryProjectCommand>): StoryProjectCommand => {
+    const replacement = cast.get(command.id);
+    if (replacement) return replacement;
     if (
       manualCamera(command) ||
       command.command === VEGA_ADV_OPCODE.Role ||
@@ -403,16 +506,16 @@ export function canonicalizeProviderStage(input: StoryProject): StoryProject {
         },
       };
     }
-    const rewrite = (value: JsonValue): JsonValue => {
+    const rewrite = (value: JsonValue, fallbackId: string): JsonValue => {
       const raw = object(value);
       if (typeof raw.command !== "number" && typeof raw.command !== "string") return value;
       const { command: opcode, commandId, ...fields } = raw;
       const next = stripCamera({
-        id: typeof commandId === "string" ? commandId : command.id,
+        id: typeof commandId === "string" ? commandId : fallbackId,
         command: opcode,
         fields,
         extensions: {},
-      });
+      }, cast);
       return { ...next.fields, command: next.command, ...(commandId === undefined ? {} : { commandId }) };
     };
     const fields = { ...command.fields };
@@ -420,18 +523,18 @@ export function canonicalizeProviderStage(input: StoryProject): StoryProject {
     if (Array.isArray(group.actions))
       fields.commandGroup = {
         ...group,
-        actions: group.actions.map((value) => {
+        actions: group.actions.map((value, index) => {
           const action = object(value);
-          return action.command === undefined ? value : { ...action, command: rewrite(action.command) };
+          return action.command === undefined ? value : { ...action, command: rewrite(action.command, `${command.id}/action/${index}`) };
         }),
       };
     const timeline = object(fields.timeline);
     if (Array.isArray(timeline.signals))
       fields.timeline = {
         ...timeline,
-        signals: timeline.signals.map((value) => {
+        signals: timeline.signals.map((value, index) => {
           const signal = object(value);
-          return signal.episode === undefined ? value : { ...signal, episode: rewrite(signal.episode) };
+          return signal.episode === undefined ? value : { ...signal, episode: rewrite(signal.episode, `${command.id}/signal/${index}`) };
         }),
       };
     return { ...command, fields };
@@ -446,7 +549,8 @@ export function canonicalizeProviderStage(input: StoryProject): StoryProject {
         presentationBaked: _baked,
         ...extensions
       } = scene.extensions;
-      return { ...scene, extensions, commands: scene.commands.map(stripCamera) };
+      const cast = providerCastContinuity(scene);
+      return { ...scene, extensions, commands: scene.commands.map((command) => stripCamera(command, cast)) };
     }),
   }, true);
 }
