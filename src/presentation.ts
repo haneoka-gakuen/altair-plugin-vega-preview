@@ -204,7 +204,7 @@ function entryCharacters(project: StoryProject): ReadonlyMap<string, ReadonlyMap
   return incoming;
 }
 
-function nativeBlocking(project: StoryProject): StoryProject {
+function nativeBlocking(project: StoryProject, preserveExitPositions = false): StoryProject {
   const incoming = entryCharacters(project);
   const stage = HANEOKA_STAGE_GEOMETRY;
   return {
@@ -276,6 +276,7 @@ function nativeBlocking(project: StoryProject): StoryProject {
             shown.delete(target);
             placed.delete(target);
           }
+        if (leaving && preserveExitPositions) return [source];
         const ordered = [...shown].sort((a, b) => a[1] - b[1]);
         const positions = new Map(
           [...planHaneokaStageBlocking(ordered.map(([target, order]) => ({ target, order })))].map(
@@ -447,11 +448,11 @@ export function canonicalizeProviderStage(input: StoryProject): StoryProject {
       } = scene.extensions;
       return { ...scene, extensions, commands: scene.commands.map(stripCamera) };
     }),
-  });
+  }, true);
 }
 
 /** Materialize native actor coordinates at an import boundary; saved actors no longer depend on an adapter. */
-export function canonicalizeNativeStage(input: StoryProject): StoryProject {
+export function canonicalizeNativeStage(input: StoryProject, preserveExitPositions = false): StoryProject {
   const previous = object(input.runtime[PRESENTATION_KEY]);
   const project = normalizeNativePresentation({
       ...input,
@@ -466,7 +467,7 @@ export function canonicalizeNativeStage(input: StoryProject): StoryProject {
     }),
     settings = object(project.runtime[PRESENTATION_KEY]);
   const automatic = settings.blocking === "automatic";
-  const positioned = automatic ? nativeBlocking(project) : project;
+  const positioned = automatic ? nativeBlocking(project, preserveExitPositions) : project;
   const worldTargets = new Set(
     positioned.scenes.flatMap((scene) =>
       storyCommandAtoms(scene.commands).flatMap((command) =>
@@ -745,10 +746,12 @@ export function prepareStoryPresentation(project: StoryProject): StoryProject {
                 : speaker);
         if (
           source.command === VEGA_ADV_OPCODE.In &&
+          (authoredShot.origin !== "automatic" || !firstTalk) &&
           (!authoredShot.subjects?.length || authoredShot.subjects.every((name) => shown.has(name)))
         ) {
           const entryFocus = focus(source, shown.has(target) ? target : "", false, authoredShot);
           const { key: _entryKey, ...fields } = entryFocus.fields;
+          appliedShotId = authoredShot.id;
           return [source, { ...entryFocus, fields }];
         }
         if (

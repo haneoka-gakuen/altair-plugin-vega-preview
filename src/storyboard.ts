@@ -164,6 +164,7 @@ interface StoryBeat {
   readonly duration: number;
   readonly boundary: boolean;
   readonly layoutChanged: boolean;
+  readonly arrivals: boolean;
   readonly choice: boolean;
   readonly dialogue: boolean;
   readonly camera: boolean;
@@ -269,6 +270,7 @@ function storyBeats(scene: StoryScene, options: StoryShotPlannerOptions): StoryB
       duration,
       boundary,
       layoutChanged: oldOrder !== newOrder || moved,
+      arrivals: [...view.keys()].some((name) => !previous.has(name)),
       choice,
       dialogue,
       camera,
@@ -421,7 +423,7 @@ export function planAutomaticStoryShots(
         targets = oldSubjects;
         distance = current.cameraDistance ?? 0;
       }
-      if (!beat.dialogue && !beat.boundary && !beat.choice && current && (!beat.layoutChanged || !names.length)) {
+      if (!beat.dialogue && !beat.boundary && !beat.choice && current && !beat.arrivals) {
         kind = current.kind;
         targets = oldSubjects;
         distance = current.cameraDistance ?? 0;
@@ -434,9 +436,9 @@ export function planAutomaticStoryShots(
         current.cameraDistance !== distance;
       const force =
         beat.boundary ||
-        (beat.layoutChanged && names.length > 0) ||
+        (beat.layoutChanged && names.length > 0 && (beat.arrivals || beat.dialogue)) ||
         beat.choice ||
-        (missing && names.length > 0) ||
+        (missing && names.length > 0 && (beat.arrivals || beat.dialogue)) ||
         current?.kind === "manual" ||
         (beat.speakers.length > 1 && beat.speakers.some((name) => beat.cast.has(name) && !oldSubjects.includes(name)));
       if (!current || force || (changed && age >= hold)) {
