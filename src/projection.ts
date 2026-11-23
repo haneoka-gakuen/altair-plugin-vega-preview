@@ -1,7 +1,12 @@
 import { STORY_CHARACTER_MODELS_KEY, resolveStoryCharacterModels } from "@haneoka/vega/story-resources";
 import type { AdvStory } from "@haneoka/vega/story-resources";
 import { assertVegaProject, isVegaCommandType } from "@haneoka/vega-protocol";
-import { prepareStoryPresentation, PRESENTATION_ORIGIN, validateStoryboard } from "./presentation.js";
+import {
+  canonicalizeProviderStage,
+  prepareStoryPresentation,
+  PRESENTATION_ORIGIN,
+  validateStoryboard,
+} from "./presentation.js";
 import { hydrateStoryPayload } from "@haneoka/vega-plugin-haneoka/story-hydration";
 export * from "./presentation.js";
 export * from "./native-authoring.js";
@@ -756,6 +761,12 @@ export const compileVegaProject = (
   options: CompileVegaProjectOptions = {},
   compiler: AltairAdvCompiler = altairAdvService,
 ): VegaProject => compileVegaProjectWithDiagnostics(project, options, compiler).project;
+
+export function compileProviderStory(input: unknown): VegaProject {
+  return compileVegaProject(canonicalizeProviderStage(altairAdvService.parseAdvStoryJson(input)), {
+    preserveAuthoringSource: false,
+  });
+}
 
 const PREVIEW_SCENE_KEY_PREFIX = "vega:scene:";
 const PREVIEW_COMMAND_KEY_PREFIX = "vega:command:";

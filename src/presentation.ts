@@ -383,6 +383,73 @@ export function normalizeNativePresentation(project: StoryProject): StoryProject
   };
 }
 
+/** Normalize a provider's authored stage before the common director plans shots. */
+export function canonicalizeProviderStage(input: StoryProject): StoryProject {
+  const stripCamera = (command: StoryProjectCommand): StoryProjectCommand => {
+    if (
+      manualCamera(command) ||
+      command.command === VEGA_ADV_OPCODE.Role ||
+      command.command === VEGA_ADV_OPCODE.CameraShake
+    ) {
+      const { key, condition } = command.fields;
+      return {
+        ...command,
+        command: VEGA_ADV_OPCODE.Delay,
+        fields: {
+          duration: 0,
+          ...(key === undefined ? {} : { key }),
+          ...(condition === undefined ? {} : { condition }),
+        },
+      };
+    }
+    const rewrite = (value: JsonValue): JsonValue => {
+      const raw = object(value);
+      if (typeof raw.command !== "number" && typeof raw.command !== "string") return value;
+      const { command: opcode, commandId, ...fields } = raw;
+      const next = stripCamera({
+        id: typeof commandId === "string" ? commandId : command.id,
+        command: opcode,
+        fields,
+        extensions: {},
+      });
+      return { ...next.fields, command: next.command, ...(commandId === undefined ? {} : { commandId }) };
+    };
+    const fields = { ...command.fields };
+    const group = object(fields.commandGroup);
+    if (Array.isArray(group.actions))
+      fields.commandGroup = {
+        ...group,
+        actions: group.actions.map((value) => {
+          const action = object(value);
+          return action.command === undefined ? value : { ...action, command: rewrite(action.command) };
+        }),
+      };
+    const timeline = object(fields.timeline);
+    if (Array.isArray(timeline.signals))
+      fields.timeline = {
+        ...timeline,
+        signals: timeline.signals.map((value) => {
+          const signal = object(value);
+          return signal.episode === undefined ? value : { ...signal, episode: rewrite(signal.episode) };
+        }),
+      };
+    return { ...command, fields };
+  };
+  return canonicalizeNativeStage({
+    ...input,
+    runtime: { ...input.runtime, presentation: { mode: "our-notes", blocking: "automatic", cameraMode: "automatic" } },
+    scenes: input.scenes.map((scene) => {
+      const {
+        [STORYBOARD_KEY]: _shots,
+        "haneoka.presentation": _presentation,
+        presentationBaked: _baked,
+        ...extensions
+      } = scene.extensions;
+      return { ...scene, extensions, commands: scene.commands.map(stripCamera) };
+    }),
+  });
+}
+
 /** Materialize native actor coordinates at an import boundary; saved actors no longer depend on an adapter. */
 export function canonicalizeNativeStage(input: StoryProject): StoryProject {
   const previous = object(input.runtime[PRESENTATION_KEY]);
